@@ -6,9 +6,25 @@ import json
 import base64
 import aiohttp
 import multiprocessing
+import subprocess
+import sys
 from playwright.async_api import async_playwright
 from concurrent.futures import ThreadPoolExecutor
 import uvloop
+
+# Auto-install required packages
+def install_and_import(package):
+    try:
+        return __import__(package)
+    except ImportError:
+        print(f"Installing {package}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        return __import__(package)
+
+# Install and import required packages
+aiohttp = install_and_import('aiohttp')
+multiprocessing = install_and_import('multiprocessing')
+uvloop = install_and_import('uvloop')
 
 # Set uvloop as the event loop policy for better performance
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
